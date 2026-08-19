@@ -246,8 +246,18 @@ export default function App() {
                 flex: 1,
                 justifyContent: "center",
                 backgroundColor:
-                  authMode === "register" ? "#38bdf8" : "#334155",
-                color: authMode === "register" ? "#0f172a" : "#fff",
+                  authMode === "register"
+                    ? "rgba(34, 211, 238, 0.16)"
+                    : "rgba(148, 163, 184, 0.08)",
+                borderColor:
+                  authMode === "register"
+                    ? "rgba(34, 211, 238, 0.4)"
+                    : "rgba(148, 163, 184, 0.18)",
+                color: authMode === "register" ? "#dffcff" : "#dfe7f4",
+                boxShadow:
+                  authMode === "register"
+                    ? "0 8px 18px rgba(34, 211, 238, 0.08)"
+                    : "none",
               }}
             >
               Nová registrace
@@ -258,8 +268,19 @@ export default function App() {
               style={{
                 flex: 1,
                 justifyContent: "center",
-                backgroundColor: authMode === "login" ? "#38bdf8" : "#334155",
-                color: authMode === "login" ? "#0f172a" : "#fff",
+                backgroundColor:
+                  authMode === "login"
+                    ? "rgba(34, 211, 238, 0.16)"
+                    : "rgba(148, 163, 184, 0.08)",
+                borderColor:
+                  authMode === "login"
+                    ? "rgba(34, 211, 238, 0.4)"
+                    : "rgba(148, 163, 184, 0.18)",
+                color: authMode === "login" ? "#dffcff" : "#dfe7f4",
+                boxShadow:
+                  authMode === "login"
+                    ? "0 8px 18px rgba(34, 211, 238, 0.08)"
+                    : "none",
               }}
             >
               Přihlásit se
@@ -274,13 +295,14 @@ export default function App() {
               style={{
                 width: "100%",
                 marginBottom: "1.25rem",
-                backgroundColor: "#8b5cf6",
-                color: "#fff",
                 justifyContent: "center",
-                boxShadow: "0 4px 14px 0 rgba(139, 92, 246, 0.39)",
+                background: "rgba(139, 92, 246, 0.12)",
+                borderColor: "rgba(139, 92, 246, 0.38)",
+                color: "#ede9fe",
+                boxShadow: "0 8px 20px rgba(139, 92, 246, 0.1)",
               }}
             >
-              <Sparkles size={16} /> 🎲 Vygenerovat náhodnou identitu
+              Vygenerovat náhodnou identitu
             </button>
           )}
 
