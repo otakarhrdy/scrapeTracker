@@ -7,25 +7,35 @@ datasource db {
   url      = "file:./dev.db"
 }
 
-// 1. Tabulka pro sledované produkty
-model Product {
-  id           Int            @id @default(autoincrement())
-  url          String         @unique // URL nesmí být v DB dvakrát
-  title        String         // Název produktu získaný ze stránky
-  currentPrice Float          // Poslední známá cena
-  createdAt    DateTime       @default(now())
-  
-  // Vazba 1:N – jeden produkt má pole historických cen
-  priceHistory PriceHistory[]
+model User {
+  id        Int       @id @default(autoincrement())
+  username  String    @unique
+  password  String    // Hashované heslo (bcrypt)
+  createdAt DateTime  @default(now())
+
+  products  Product[]
 }
 
-// 2. Tabulka pro historii cen
+model Product {
+  id           Int            @id @default(autoincrement())
+  url          String
+  title        String
+  currentPrice Float
+  createdAt    DateTime       @default(now())
+
+  userId       Int
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  priceHistory PriceHistory[]
+
+  @@unique([url, userId]) // Uživatel nemůže sledovat stejnou URL 2x
+}
+
 model PriceHistory {
   id        Int      @id @default(autoincrement())
-  price     Float    // Cena v daný okamžik
-  timestamp DateTime @default(now()) // Kdy byla cena naměřena
-  
-  // Cizí klíč (Foreign Key) propojující záznam s konkrétním produktem
+  price     Float
+  timestamp DateTime @default(now())
+
   productId Int
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 }

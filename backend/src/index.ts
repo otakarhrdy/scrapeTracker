@@ -4,32 +4,124 @@ import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import cron from "node-cron";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { scrapeProduct } from "./scraper.js";
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5000;
 
-// Middleware pro povolení požadavků z Reactu a parsování JSON
+// Middleware pro povolení požadavků z frontendu a zpracování JSON těla
 app.use(cors());
 app.use(express.json());
 
-// --- 1. Zod validace příchozí URL ---
+// --- ZOD SCHÉMATA PRO VALIDACI VSTUPŮ ---
+
+const AuthSchema = z.object({
+  username: z.string().min(3, "Uživatelské jméno musí mít alespoň 3 znaky."),
+  password: z.string().min(6, "Heslo musí mít alespoň 6 znaků."),
+});
+
 const TrackUrlSchema = z.object({
   url: z
     .string()
     .url("Zadejte platnou webovou adresu začínající na http:// nebo https://"),
 });
 
-// --- 2. REST API Endpointy ---
+// --- AUTH ENDPOINTY (Pseudonymní účty & Správce hesel) ---
 
-// GET: Vrátí všechny sledované produkty včetně celé jejich cenové historie
-app.get("/api/products", async (_req: Request, res: Response) => {
+// 1. POST: Registrace nového anonymního účtu s hashovaným heslem
+app.post("/api/auth/register", async (req: Request, res: Response) => {
+  const parseResult = AuthSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res
+      .status(400)
+      .json({
+        error: parseResult.error.issues[0]?.message || "Neplatná data.",
+      });
+  }
+
+  const { username, password } = parseResult.data;
+
+  try {
+    const existing = await prisma.user.findUnique({ where: { username } });
+    if (existing) {
+      return res
+        .status(400)
+        .json({
+          error: "Toto uživatelské jméno je již obsazené. Vygenerujte jiné.",
+        });
+    }
+
+    // Bezpečné zahešování hesla (10 kol saltu)
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.create({
+      data: {
+        username,
+        password: hashedPassword,
+      },
+    });
+
+    return res.status(201).json({ id: user.id, username: user.username });
+  } catch (err) {
+    console.error("Chyba při registraci:", err);
+    return res.status(500).json({ error: "Chyba serveru při vytváření účtu." });
+  }
+});
+
+// 2. POST: Přihlášení k existujícímu anonymnímu účtu
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  const parseResult = AuthSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res
+      .status(400)
+      .json({ error: "Vyplňte uživatelské jméno i heslo." });
+  }
+
+  const { username, password } = parseResult.data;
+
+  try {
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (!user) {
+      return res
+        .status(401)
+        .json({ error: "Neplatné uživatelské jméno nebo heslo." });
+    }
+
+    // Ověření hashe hesla
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
+      return res
+        .status(401)
+        .json({ error: "Neplatné uživatelské jméno nebo heslo." });
+    }
+
+    return res.json({ id: user.id, username: user.username });
+  } catch (err) {
+    console.error("Chyba při přihlašování:", err);
+    return res.status(500).json({ error: "Chyba serveru při přihlašování." });
+  }
+});
+
+// --- REST API ENDPOINTY PRO PRODUKTY (Vázané na uživatele) ---
+
+// GET: Vrátí produkty POUZE přihlášeného uživatele (dle hlavičky x-user-id)
+app.get("/api/products", async (req: Request, res: Response) => {
+  const userId = Number(req.headers["x-user-id"]);
+
+  if (!userId || isNaN(userId)) {
+    return res
+      .status(401)
+      .json({ error: "Neautorizovaný přístup. Přihlaste se prosím." });
+  }
+
   try {
     const products = await prisma.product.findMany({
+      where: { userId },
       include: {
         priceHistory: {
-          orderBy: { timestamp: "asc" }, // Historie seřazená chronologicky pro graf
+          orderBy: { timestamp: "asc" },
         },
       },
       orderBy: { createdAt: "desc" },
@@ -39,14 +131,21 @@ app.get("/api/products", async (_req: Request, res: Response) => {
     console.error("Chyba při čtení produktů:", error);
     return res
       .status(500)
-      .json({ error: "Chyba serveru při načítání produktů" });
+      .json({ error: "Chyba serveru při načítání produktů." });
   }
 });
 
-// POST: Přidat novou URL ke sledování (okamžitě stáhne první data)
+// POST: Přidat novou URL ke sledování pod aktuálního uživatele
 app.post("/api/products", async (req: Request, res: Response) => {
-  const parseResult = TrackUrlSchema.safeParse(req.body);
+  const userId = Number(req.headers["x-user-id"]);
 
+  if (!userId || isNaN(userId)) {
+    return res
+      .status(401)
+      .json({ error: "Neautorizovaný přístup. Přihlaste se prosím." });
+  }
+
+  const parseResult = TrackUrlSchema.safeParse(req.body);
   if (!parseResult.success) {
     return res.status(400).json({ errors: parseResult.error.issues });
   }
@@ -54,21 +153,29 @@ app.post("/api/products", async (req: Request, res: Response) => {
   const { url } = parseResult.data;
 
   try {
-    // 1. Zkontrolujeme, zda už URL v databázi nesledujeme
-    const existing = await prisma.product.findUnique({ where: { url } });
+    // Ověříme, zda uživatel už stejný odkaz nesleduje
+    const existing = await prisma.product.findUnique({
+      where: {
+        url_userId: { url, userId },
+      },
+    });
+
     if (existing) {
-      return res.status(400).json({ error: "Tento produkt již sledujete" });
+      return res
+        .status(400)
+        .json({ error: "Tento produkt již ve svém účtu sledujete." });
     }
 
-    // 2. Provedeme první scraping stránky
+    // Provedeme scraping přes Playwright
     const scraped = await scrapeProduct(url);
 
-    // 3. Vytvoříme produkt a rovnou vložíme první bod do historie cen
+    // Uložíme produkt provázaný s userId a prvním bodem v cenové historii
     const newProduct = await prisma.product.create({
       data: {
         url,
         title: scraped.title,
         currentPrice: scraped.price,
+        userId,
         priceHistory: {
           create: {
             price: scraped.price,
@@ -85,27 +192,32 @@ app.post("/api/products", async (req: Request, res: Response) => {
     console.error("Chyba při scrapingu/ukládání:", error.message);
     return res
       .status(500)
-      .json({ error: error.message || "Nepodařilo se načíst data z URL" });
+      .json({ error: error.message || "Nepodařilo se načíst data z URL." });
   }
 });
 
-// DELETE: Smazat produkt ze sledování
+// DELETE: Smazat sledovaný produkt (pouze pokud patří danému uživateli)
 app.delete("/api/products/:id", async (req: Request, res: Response) => {
   const id = Number(req.params.id);
-  if (isNaN(id)) return res.status(400).json({ error: "Neplatné ID" });
+  const userId = Number(req.headers["x-user-id"]);
+
+  if (isNaN(id) || !userId || isNaN(userId)) {
+    return res.status(400).json({ error: "Neplatný požadavek." });
+  }
 
   try {
-    // Díky "onDelete: Cascade" v Prisma schématu se smaže i cenová historie
-    await prisma.product.delete({ where: { id } });
-    return res.json({ message: "Produkt byl úspěšně odstraněn" });
+    await prisma.product.deleteMany({
+      where: { id, userId },
+    });
+    return res.json({ message: "Produkt byl úspěšně odstraněn." });
   } catch (error) {
-    return res.status(500).json({ error: "Chyba při mazání produktu" });
+    console.error("Chyba při mazání:", error);
+    return res.status(500).json({ error: "Chyba při mazání produktu." });
   }
 });
 
-// --- 3. Automatický CRON plánovač (Sledování na pozadí) ---
-// Běží automaticky každou hodinu (syntaxe: minuta hodina den měsíc den-v-týdnu)
-// Pro testování každých 5 minut lze změnit na: '*/5 * * * *'
+// --- 3. AUTOMATICKÝ CRON PLÁNOVAČ ---
+// Kontroluje ceny všech produktů napříč všemi uživateli každou hodinu
 cron.schedule("0 * * * *", async () => {
   console.log("⏰ [CRON] Spouštím automatickou kontrolu cen všech produktů...");
 
@@ -116,7 +228,6 @@ cron.schedule("0 * * * *", async () => {
       try {
         const scraped = await scrapeProduct(product.url);
 
-        // Uložíme nový časový bod s cenou
         await prisma.priceHistory.create({
           data: {
             productId: product.id,
@@ -124,7 +235,6 @@ cron.schedule("0 * * * *", async () => {
           },
         });
 
-        // Aktualizujeme aktuální cenu u produktu
         await prisma.product.update({
           where: { id: product.id },
           data: { currentPrice: scraped.price },
