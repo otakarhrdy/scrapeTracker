@@ -42,6 +42,24 @@ interface Product {
   priceHistory: PricePoint[];
 }
 
+const parseJsonResponse = async <T,>(res: Response): Promise<T> => {
+  const contentType = res.headers.get("content-type") || "";
+
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+
+    if (text.includes("<!DOCTYPE") || text.includes("<html")) {
+      throw new Error(
+        "API server vrátil HTML místo JSON. Zkontrolujte VITE_API_URL nebo adresu produkčního backendu.",
+      );
+    }
+
+    throw new Error(text || `Request failed with status ${res.status}`);
+  }
+
+  return (await res.json()) as T;
+};
+
 const generateRandomCredentials = () => {
   const adjectives = [
     "silent",
@@ -97,7 +115,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const API_URL =
+    (import.meta.env.VITE_API_URL
+      ? String(import.meta.env.VITE_API_URL).replace(/\/+$/, "")
+      : window.location.hostname === "localhost"
+        ? "http://localhost:5000"
+        : window.location.origin) + "/api";
 
   const loadProducts = async () => {
     if (!currentUser) return;
@@ -106,7 +129,7 @@ export default function App() {
         headers: { "x-user-id": String(currentUser.id) },
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = await parseJsonResponse<Product[]>(res);
         setProducts(data);
       }
     } catch (err) {
@@ -145,7 +168,7 @@ export default function App() {
         }),
       });
 
-      const data = await res.json();
+      const data = await parseJsonResponse<User & { error?: string }>(res);
 
       if (!res.ok) {
         throw new Error(data.error || "Autentizace selhala");
@@ -190,7 +213,7 @@ export default function App() {
         body: JSON.stringify({ url: inputUrl }),
       });
 
-      const data = await res.json();
+      const data = await parseJsonResponse<{ error?: string }>(res);
 
       if (!res.ok) {
         throw new Error(data.error || "Scraping selhal");
