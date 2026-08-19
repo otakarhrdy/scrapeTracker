@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// 1. Tabulka pro sledované produkty
+model Product {
+  id           Int            @id @default(autoincrement())
+  url          String         @unique // URL nesmí být v DB dvakrát
+  title        String         // Název produktu získaný ze stránky
+  currentPrice Float          // Poslední známá cena
+  createdAt    DateTime       @default(now())
+  
+  // Vazba 1:N – jeden produkt má pole historických cen
+  priceHistory PriceHistory[]
+}
+
+// 2. Tabulka pro historii cen
+model PriceHistory {
+  id        Int      @id @default(autoincrement())
+  price     Float    // Cena v daný okamžik
+  timestamp DateTime @default(now()) // Kdy byla cena naměřena
+  
+  // Cizí klíč (Foreign Key) propojující záznam s konkrétním produktem
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
