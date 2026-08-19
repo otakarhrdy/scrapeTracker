@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set Playwright to install browsers in project directory
+export PLAYWRIGHT_BROWSERS_PATH="$PWD/pw-browsers"
+
 # Install dependencies in backend
 cd backend
 npm install
