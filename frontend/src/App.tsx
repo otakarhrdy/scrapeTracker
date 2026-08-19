@@ -97,7 +97,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const API_URL = "http://localhost:5000/api";
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
   const loadProducts = async () => {
     if (!currentUser) return;
