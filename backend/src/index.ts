@@ -17,6 +17,9 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
 ].filter(Boolean) as string[];
 
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
 // Middleware pro povolení požadavků z frontendu a zpracování JSON těla
 app.use(
   cors({
