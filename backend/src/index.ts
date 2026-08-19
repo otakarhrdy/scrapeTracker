@@ -6,6 +6,8 @@ import cron from "node-cron";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { scrapeProduct } from "./scraper.js";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -34,11 +36,9 @@ const TrackUrlSchema = z.object({
 app.post("/api/auth/register", async (req: Request, res: Response) => {
   const parseResult = AuthSchema.safeParse(req.body);
   if (!parseResult.success) {
-    return res
-      .status(400)
-      .json({
-        error: parseResult.error.issues[0]?.message || "Neplatná data.",
-      });
+    return res.status(400).json({
+      error: parseResult.error.issues[0]?.message || "Neplatná data.",
+    });
   }
 
   const { username, password } = parseResult.data;
@@ -46,11 +46,9 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
   try {
     const existing = await prisma.user.findUnique({ where: { username } });
     if (existing) {
-      return res
-        .status(400)
-        .json({
-          error: "Toto uživatelské jméno je již obsazené. Vygenerujte jiné.",
-        });
+      return res.status(400).json({
+        error: "Toto uživatelské jméno je již obsazené. Vygenerujte jiné.",
+      });
     }
 
     // Bezpečné zahešování hesla (10 kol saltu)
@@ -253,6 +251,14 @@ cron.schedule("0 * * * *", async () => {
   } catch (err) {
     console.error("❌ [CRON] Chyba při spuštění plánovače:", err);
   }
+});
+
+// Servírování sestaveného React frontendu
+const frontendDist = path.resolve(process.cwd(), "../frontend/dist");
+app.use(express.static(frontendDist));
+
+app.get("*", (_req: Request, res: Response) => {
+  res.sendFile(path.join(frontendDist, "index.html"));
 });
 
 // Spuštění serveru
