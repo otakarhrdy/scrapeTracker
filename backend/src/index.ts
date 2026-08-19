@@ -1,3 +1,6 @@
+// Set Playwright browsers path BEFORE importing Playwright
+process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '../pw-browsers';
+
 import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";

@@ -1,7 +1,3 @@
-// Set Playwright browsers path if not already set
-process.env.PLAYWRIGHT_BROWSERS_PATH =
-  process.env.PLAYWRIGHT_BROWSERS_PATH || "../pw-browsers";
-
 import { chromium } from "playwright";
 
 export interface ScrapedData {
