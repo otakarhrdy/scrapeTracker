@@ -257,7 +257,7 @@ cron.schedule("0 * * * *", async () => {
 const frontendDist = path.resolve(process.cwd(), "../frontend/dist");
 app.use(express.static(frontendDist));
 
-app.get("*", (_req: Request, res: Response) => {
+app.get("*", (_req, res) => {
   res.sendFile(path.join(frontendDist, "index.html"));
 });
 
