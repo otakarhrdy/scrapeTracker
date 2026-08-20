@@ -192,7 +192,7 @@ Dashboard si navíc data automaticky načítá každou hodinu.
 
 ## Bezpečnost
 
-- Hesla jsou hashovaná pomocí bcryptjs (10 salt rounds)
+- Hesla jsou hashovaná 
 - CORS kontrola pro frontend přístup
 - Zod validace pro všechny API vstupy
 - Každý uživatel vidí pouze své produkty
