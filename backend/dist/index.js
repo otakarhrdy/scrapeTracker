@@ -14,6 +14,7 @@ const { PrismaClient } = prismaModule;
 import cron from "node-cron";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import { refreshPrices } from "./price-refresh.js";
 import { scrapeProduct } from "./scraper.js";
 const app = express();
 const prisma = new PrismaClient();
@@ -209,35 +210,18 @@ app.delete("/api/products/:id", async (req, res) => {
     }
 });
 // --- 3. AUTOMATICKÝ CRON PLÁNOVAČ ---
-// Kontroluje ceny všech produktů napříč všemi uživateli každou hodinu
-cron.schedule("0 * * * *", async () => {
-    console.log("⏰ [CRON] Spouštím automatickou kontrolu cen všech produktů...");
-    try {
-        const products = await prisma.product.findMany();
-        for (const product of products) {
-            try {
-                const scraped = await scrapeProduct(product.url);
-                await prisma.priceHistory.create({
-                    data: {
-                        productId: product.id,
-                        price: scraped.price,
-                    },
-                });
-                await prisma.product.update({
-                    where: { id: product.id },
-                    data: { currentPrice: scraped.price },
-                });
-                console.log(`✔ [CRON] Aktualizováno: "${product.title}" -> ${scraped.price} Kč`);
-            }
-            catch (err) {
-                console.error(`❌ [CRON] Chyba u produktu ID ${product.id}:`, err.message);
-            }
+// Na produkci může aktualizace běžet jako samostatný Render Cron Job.
+if (process.env.ENABLE_IN_PROCESS_CRON !== "false") {
+    cron.schedule("0 * * * *", async () => {
+        console.log("⏰ [CRON] Spouštím automatickou kontrolu cen všech produktů...");
+        try {
+            await refreshPrices(prisma);
         }
-    }
-    catch (err) {
-        console.error("❌ [CRON] Chyba při spuštění plánovače:", err);
-    }
-});
+        catch (err) {
+            console.error("❌ [CRON] Chyba při spuštění plánovače:", err);
+        }
+    });
+}
 // Servírování sestaveného React frontendu
 const frontendDist = path.resolve(process.cwd(), "../frontend/dist");
 if (existsSync(frontendDist)) {

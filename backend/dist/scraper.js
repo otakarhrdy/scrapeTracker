@@ -1,107 +1,124 @@
+import axios from "axios";
+import * as cheerio from "cheerio";
 import { chromium } from "playwright";
-// Pomocná funkce pro bezpečné čekání bez závislosti na verzi Playwrightu
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Sdílená instance prohlížeče (zabrání pomalému spouštění od nuly)
+let globalBrowser = null;
+async function getBrowser() {
+    if (!globalBrowser || !globalBrowser.isConnected()) {
+        globalBrowser = await chromium.launch({
+            headless: true,
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
+        });
+    }
+    return globalBrowser;
+}
+// Pomocná funkce pro vytažení dat z HTML (JSON-LD + meta značky)
+function extractDataFromHtml(html) {
+    const $ = cheerio.load(html);
+    // A) Rychlé vyhledání v JSON-LD mikrodatech
+    const jsonLdScripts = $('script[type="application/ld+json"]');
+    for (let i = 0; i < jsonLdScripts.length; i++) {
+        try {
+            const content = $(jsonLdScripts[i]).html();
+            if (!content)
+                continue;
+            const data = JSON.parse(content);
+            const product = Array.isArray(data)
+                ? data.find((item) => item["@type"] === "Product")
+                : data["@type"] === "Product"
+                    ? data
+                    : null;
+            if (product) {
+                const title = product.name || $("title").text().trim();
+                const price = product.offers?.price ||
+                    product.offers?.lowPrice ||
+                    (Array.isArray(product.offers) ? product.offers[0]?.price : null);
+                if (title && price) {
+                    const parsedPrice = parseFloat(String(price)
+                        .replace(/[^\d.,]/g, "")
+                        .replace(",", "."));
+                    if (!isNaN(parsedPrice) && parsedPrice > 0) {
+                        return { title: String(title).trim(), price: parsedPrice };
+                    }
+                }
+            }
+        }
+        catch {
+            // Ignorujeme nevalidní JSON bloky
+        }
+    }
+    // B) Fallback na meta tagy
+    const metaTitle = $('meta[property="og:title"]').attr("content") || $("title").text().trim();
+    const metaPrice = $('meta[property="product:price:amount"]').attr("content") ||
+        $('meta[property="og:price:amount"]').attr("content");
+    if (metaTitle && metaPrice) {
+        const parsedPrice = parseFloat(metaPrice.replace(/[^\d.,]/g, "").replace(",", "."));
+        if (!isNaN(parsedPrice) && parsedPrice > 0) {
+            return { title: metaTitle, price: parsedPrice };
+        }
+    }
+    return null;
+}
+// Hlavní scraper funkce
 export async function scrapeProduct(url) {
-    const browser = await chromium.launch({
-        headless: true,
-        args: [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-        ],
+    // 1. Ultra-rychlý pokus přes Axios (~200 až 500 ms)
+    try {
+        const response = await axios.get(url, {
+            timeout: 3500,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+            },
+        });
+        const directResult = extractDataFromHtml(response.data);
+        if (directResult) {
+            return directResult;
+        }
+    }
+    catch {
+        // Pokud Axios selže (např. Cloudflare ochrana), pokračujeme na Playwright
+    }
+    // 2. Playwright fallback s blokováním zbytečných médií
+    const browser = await getBrowser();
+    const context = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    });
+    const page = await context.newPage();
+    // Zablokování stahování obrázků, stylů a fontů pro maximální rychlost
+    await page.route("**/*", (route) => {
+        const resourceType = route.request().resourceType();
+        if (["image", "stylesheet", "font", "media", "imageset"].includes(resourceType)) {
+            route.abort();
+        }
+        else {
+            route.continue();
+        }
     });
     try {
-        const context = await browser.newContext({
-            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport: { width: 1366, height: 768 },
-            locale: "cs-CZ",
-        });
-        const page = await context.newPage();
-        // 1. Otevřeme stránku a počkáme na DOM
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-        // 2. Počkáme 2 sekundy na případné dotvoření DOMu
-        await sleep(2000);
-        let title = "";
-        let price = 0;
-        // 3. Metoda A: Zkusíme JSON-LD mikrodata
-        const jsonLdElements = await page.$$('script[type="application/ld+json"]');
-        for (const el of jsonLdElements) {
-            try {
-                const text = await el.textContent();
-                if (text) {
-                    const parsed = JSON.parse(text);
-                    const data = Array.isArray(parsed) ? parsed[0] : parsed;
-                    if (data && (data["@type"] === "Product" || data.offers)) {
-                        if (data.name && !title)
-                            title = data.name;
-                        const offers = Array.isArray(data.offers)
-                            ? data.offers[0]
-                            : data.offers;
-                        if (offers && offers.price) {
-                            price = parseFloat(String(offers.price));
-                        }
-                    }
-                }
-            }
-            catch {
-                // Ignorujeme nevalidní JSON
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        const html = await page.content();
+        const playwrightResult = extractDataFromHtml(html);
+        if (playwrightResult) {
+            return playwrightResult;
+        }
+        const title = (await page.title()) || "Neznámý produkt";
+        const bodyText = await page.innerText("body");
+        const priceMatch = bodyText.match(/(\d[\d\s]*([.,]\d{1,2})?)\s*(Kč|CZK|€|\$)/i);
+        if (priceMatch) {
+            const cleanPrice = parseFloat(priceMatch[1].replace(/\s+/g, "").replace(",", "."));
+            if (!isNaN(cleanPrice) && cleanPrice > 0) {
+                return { title: title.replace(/\s+/g, " ").trim(), price: cleanPrice };
             }
         }
-        // 4. Metoda B: Titulek z <h1> nebo <title>
-        if (!title) {
-            const h1 = await page.$("h1");
-            if (h1) {
-                title = (await h1.textContent())?.trim() || "";
-            }
-            if (!title) {
-                title = (await page.title()) || "Neznámý produkt";
-            }
-            title = title.split("|")[0].trim();
-        }
-        // 5. Metoda C: Hledání ceny v elementech
-        if (!price || isNaN(price)) {
-            const priceSelectors = [
-                "p.price_color",
-                ".price-box__price",
-                ".bigPrice",
-                "[data-price]",
-                ".price_withVat",
-                ".price-v2",
-                ".c2",
-                "span.price",
-                ".price-item--regular",
-                'meta[property="product:price:amount"]',
-            ];
-            let rawPrice = "";
-            for (const sel of priceSelectors) {
-                const el = await page.$(sel);
-                if (el) {
-                    const text = (await el.textContent()) ||
-                        (await el.getAttribute("content")) ||
-                        "";
-                    if (/\d/.test(text)) {
-                        rawPrice = text;
-                        break;
-                    }
-                }
-            }
-            if (rawPrice) {
-                const cleaned = rawPrice
-                    .replace(/\s+/g, "")
-                    .replace(/[^\d.,]/g, "")
-                    .replace(",", ".");
-                price = parseFloat(cleaned);
-            }
-        }
-        if (!price || isNaN(price)) {
-            throw new Error("Na stránce se nepodařilo nalézt platnou číselnou cenu.");
-        }
-        return {
-            title: title || "Neznámý produkt",
-            price,
-        };
+        throw new Error("Nepodařilo se najít cenu produktu");
     }
     finally {
-        await browser.close();
+        await page.close();
+        await context.close();
     }
 }

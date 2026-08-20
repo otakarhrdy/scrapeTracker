@@ -140,6 +140,9 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       loadProducts();
+
+      const refreshTimer = window.setInterval(loadProducts, 60 * 60 * 1000);
+      return () => window.clearInterval(refreshTimer);
     }
   }, [currentUser]);
 

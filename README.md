@@ -161,6 +161,21 @@ bash render-build.sh
 cd backend && npm run start
 ```
 
+### Důležité: hodinová aktualizace na Renderu
+
+`node-cron` běží pouze po dobu, kdy běží Node proces. Pokud je webová služba
+na Renderu uspávaná, hodinová kontrola se nespustí. Pro spolehlivé aktualizace
+vytvořte na Renderu samostatný **Cron Job** se stejným repozitářem a databází:
+
+- **Build Command:** `bash render-build.sh`
+- **Schedule:** `0 * * * *`
+- **Start Command:** `cd backend && npm run refresh`
+
+Na webové službě nastavte `ENABLE_IN_PROCESS_CRON=false`, aby se aktualizace
+nespouštěla dvakrát, pokud webová instance zůstane běžet.
+
+Dashboard si navíc data automaticky načítá každou hodinu.
+
 ### Environment Variables
 
 - `DATABASE_URL` - PostgreSQL connection string
