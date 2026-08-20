@@ -1,5 +1,13 @@
-// Set Playwright browsers path BEFORE importing Playwright
-process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '../pw-browsers';
+import path from "path";
+import { existsSync } from "fs";
+import { fileURLToPath } from "url";
+
+// Set Playwright browsers path BEFORE importing other modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, "../..");
+process.env.PLAYWRIGHT_BROWSERS_PATH =
+  process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(projectRoot, "pw-browsers");
 
 import express from "express";
 import type { Request, Response } from "express";
@@ -9,8 +17,6 @@ import cron from "node-cron";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { scrapeProduct } from "./scraper.js";
-import path from "path";
-import { existsSync } from "fs";
 
 const app = express();
 const prisma = new PrismaClient();
