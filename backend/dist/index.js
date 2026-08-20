@@ -220,7 +220,7 @@ if (process.env.ENABLE_IN_PROCESS_CRON !== "false") {
         catch (err) {
             console.error("❌ [CRON] Chyba při spuštění plánovače:", err);
         }
-    });
+    }, { timezone: "Europe/Prague" });
 }
 // Servírování sestaveného React frontendu
 const frontendDist = path.resolve(process.cwd(), "../frontend/dist");

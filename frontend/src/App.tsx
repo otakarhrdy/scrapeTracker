@@ -107,6 +107,7 @@ export default function App() {
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [copiedPass, setCopiedPass] = useState(false);
 
@@ -157,7 +158,10 @@ export default function App() {
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authLoading) return;
+
     setAuthError("");
+    setAuthLoading(true);
 
     const endpoint = authMode === "register" ? "/auth/register" : "/auth/login";
 
@@ -183,6 +187,8 @@ export default function App() {
       setAuthPassword("");
     } catch (err: any) {
       setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
@@ -471,16 +477,25 @@ export default function App() {
             <button
               type="submit"
               className="btn-primary"
+              disabled={authLoading}
               style={{
                 justifyContent: "center",
                 marginTop: "0.5rem",
                 padding: "0.85rem",
+                opacity: authLoading ? 0.7 : 1,
+                cursor: authLoading ? "wait" : "pointer",
               }}
             >
-              <ShieldCheck size={18} />{" "}
-              {authMode === "register"
-                ? "Vytvořit anonymní profil"
-                : "Vstoupit do dashboardu"}
+              {authLoading ? (
+                <RefreshCw size={18} className="animate-spin" />
+              ) : (
+                <ShieldCheck size={18} />
+              )}{" "}
+              {authLoading
+                ? "Čekám na server..."
+                : authMode === "register"
+                  ? "Vytvořit anonymní profil"
+                  : "Vstoupit do dashboardu"}
             </button>
           </form>
         </div>

@@ -247,17 +247,21 @@ app.delete("/api/products/:id", async (req: Request, res: Response) => {
 // --- 3. AUTOMATICKÝ CRON PLÁNOVAČ ---
 // Na produkci může aktualizace běžet jako samostatný Render Cron Job.
 if (process.env.ENABLE_IN_PROCESS_CRON !== "false") {
-  cron.schedule("0 * * * *", async () => {
-    console.log(
-      "⏰ [CRON] Spouštím automatickou kontrolu cen všech produktů...",
-    );
+  cron.schedule(
+    "0 * * * *",
+    async () => {
+      console.log(
+        "⏰ [CRON] Spouštím automatickou kontrolu cen všech produktů...",
+      );
 
-    try {
-      await refreshPrices(prisma);
-    } catch (err) {
-      console.error("❌ [CRON] Chyba při spuštění plánovače:", err);
-    }
-  });
+      try {
+        await refreshPrices(prisma);
+      } catch (err) {
+        console.error("❌ [CRON] Chyba při spuštění plánovače:", err);
+      }
+    },
+    { timezone: "Europe/Prague" },
+  );
 }
 
 // Servírování sestaveného React frontendu

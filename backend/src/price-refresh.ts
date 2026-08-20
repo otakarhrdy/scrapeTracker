@@ -14,6 +14,7 @@ type DatabaseClient = InstanceType<typeof PrismaClient>;
 
 export async function refreshPrices(prisma: DatabaseClient): Promise<void> {
   const products = await prisma.product.findMany();
+  console.log(`[PRICE REFRESH] Nalezeno produktu: ${products.length}`);
 
   for (const product of products) {
     try {
