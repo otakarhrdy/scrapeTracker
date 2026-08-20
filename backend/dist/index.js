@@ -1,12 +1,20 @@
+import path from "path";
+import { existsSync } from "fs";
+import { fileURLToPath } from "url";
+// Set Playwright browsers path BEFORE importing other modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, "../..");
+process.env.PLAYWRIGHT_BROWSERS_PATH =
+    process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(projectRoot, "pw-browsers");
 import express from "express";
 import cors from "cors";
-import { PrismaClient } from "@prisma/client";
+import prismaModule from "@prisma/client";
+const { PrismaClient } = prismaModule;
 import cron from "node-cron";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { scrapeProduct } from "./scraper.js";
-import path from "path";
-import { existsSync } from "fs";
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5000;
@@ -234,7 +242,7 @@ cron.schedule("0 * * * *", async () => {
 const frontendDist = path.resolve(process.cwd(), "../frontend/dist");
 if (existsSync(frontendDist)) {
     app.use(express.static(frontendDist));
-    app.get("*", (_req, res) => {
+    app.use((_req, res) => {
         res.sendFile(path.join(frontendDist, "index.html"));
     });
 }
