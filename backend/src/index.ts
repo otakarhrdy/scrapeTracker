@@ -12,7 +12,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH =
 import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
-import { PrismaClient } from "@prisma/client";
+import prismaModule from "@prisma/client";
+const { PrismaClient } = prismaModule;
 import cron from "node-cron";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
