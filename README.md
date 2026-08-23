@@ -12,7 +12,7 @@ Aplikace umožňuje uživatelům sledovat ceny produktů z webových stránek. P
 - Přidávání URL produktů ke sledování
 - Automatické scraping cen pomocí Playwright
 - Sledování cenové historie v čase
-- Cronovaná úloha pro pravidelné kontroly cen (každou hodinu)
+- Cronovaná úloha pro pravidelné denní kontroly cen
 - Responzivní webové rozhraní
 - Nasazení na Render.com s PostgreSQL databází
 
@@ -128,7 +128,8 @@ Všechny požadavky vyžadují hlavičku `x-user-id` s ID přihlášeného uživ
 
 ## Automatizace
 
-Backend spouští cronovanou úlohu každou celou hodinu, která:
+Backend spouští cronovanou úlohu každý den v 01:00 podle časového pásma
+Europe/Prague, která:
 
 1. Načte všechny produkty všech uživatelů
 2. Pro každý produkt stáhne aktuální cenu pomocí Playwright
@@ -161,14 +162,14 @@ bash render-build.sh
 cd backend && npm run start
 ```
 
-### Důležité: hodinová aktualizace na Renderu
+### Důležité: denní aktualizace na Renderu
 
 `node-cron` běží pouze po dobu, kdy běží Node proces. Pokud je webová služba
-na Renderu uspávaná, hodinová kontrola se nespustí. Pro spolehlivé aktualizace
+na Renderu uspávaná, denní kontrola se nespustí. Pro spolehlivé aktualizace
 vytvořte na Renderu samostatný **Cron Job** se stejným repozitářem a databází:
 
 - **Build Command:** `bash render-build.sh`
-- **Schedule:** `0 * * * *`
+- **Schedule:** `0 1 * * *`
 - **Start Command:** `cd backend && npm run refresh`
 
 Na webové službě nastavte `ENABLE_IN_PROCESS_CRON=false`, aby se aktualizace
@@ -192,7 +193,7 @@ Dashboard si navíc data automaticky načítá každou hodinu.
 
 ## Bezpečnost
 
-- Hesla jsou hashovaná 
+- Hesla jsou hashovaná
 - CORS kontrola pro frontend přístup
 - Zod validace pro všechny API vstupy
 - Každý uživatel vidí pouze své produkty
