@@ -31,6 +31,7 @@ const allowedOrigins = [
 app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
+
 // Middleware pro povolení požadavků z frontendu a zpracování JSON těla
 app.use(
   cors({
@@ -39,7 +40,6 @@ app.use(
         callback(null, true);
         return;
       }
-
       callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
@@ -48,7 +48,6 @@ app.use(
 app.use(express.json());
 
 // --- ZOD SCHÉMATA PRO VALIDACI VSTUPŮ ---
-
 const AuthSchema = z.object({
   username: z.string().min(3, "Uživatelské jméno musí mít alespoň 3 znaky."),
   password: z.string().min(6, "Heslo musí mít alespoň 6 znaků."),
@@ -244,16 +243,48 @@ app.delete("/api/products/:id", async (req: Request, res: Response) => {
   }
 });
 
-// --- 3. AUTOMATICKÝ CRON PLÁNOVAČ ---
-// Na produkci může aktualizace běžet jako samostatný Render Cron Job.
+// --- ENDPOINTY PRO SPUŠTĚNÍ REFRESHU CEN ---
+
+// 1. Endpoint pro externí Cron (např. cron-job.org probudí server a spustí refresh)
+app.get("/api/cron/refresh", async (_req: Request, res: Response) => {
+  try {
+    console.log("⏰ [WEBHOOK CRON] Požadavek na aktualizaci cen...");
+    await refreshPrices(prisma);
+    return res.json({
+      success: true,
+      message: "Ceny byly úspěšně aktualizovány.",
+    });
+  } catch (err: any) {
+    console.error("❌ [WEBHOOK CRON] Chyba:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Ruční testovací endpoint (pro ověření v prohlížeči)
+app.get("/api/test-refresh", async (_req: Request, res: Response) => {
+  try {
+    console.log("🚀 Spouštím okamžitý ruční refresh cen...");
+    await refreshPrices(prisma);
+    return res.json({
+      success: true,
+      message: "Ceny byly úspěšně aktualizovány!",
+    });
+  } catch (err: any) {
+    console.error("❌ Chyba při ručním refreshi:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- AUTOMATICKÝ INTERNÍ CRON PLÁNOVAČ ---
+// Funguje, pokud proces běží (např. lokálně). Na spícím serveru Renderu slouží jako pojistka.
 if (process.env.ENABLE_IN_PROCESS_CRON !== "false") {
+  // Spustí se každý den přesně v 11:00 dopoledne pražského času
   cron.schedule(
-    "0 1 * * *",
+    "0 11 * * *",
     async () => {
       console.log(
         "⏰ [CRON] Spouštím automatickou kontrolu cen všech produktů...",
       );
-
       try {
         await refreshPrices(prisma);
       } catch (err) {
