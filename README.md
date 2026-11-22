@@ -128,8 +128,14 @@ Všechny požadavky vyžadují hlavičku `x-user-id` s ID přihlášeného uživ
 
 ## Automatizace
 
-Backend spouští cronovanou úlohu každý den v 01:00 podle časového pásma
-Europe/Prague, která:
+Backend automaticky spouští kontrolu cen každý den ve 11:00 podle časového
+pásma Europe/Prague. Nasazení na Renderu používá:
+
+- placenou instanci webové služby, která se automaticky nespíná,
+- GitHub Actions jako externí spouštěč ve 11:00,
+- interní `node-cron` jako pojistku, pokud platí webová instance.
+
+Proces:
 
 1. Načte všechny produkty všech uživatelů
 2. Pro každý produkt stáhne aktuální cenu pomocí Playwright
@@ -164,16 +170,14 @@ cd backend && npm run start
 
 ### Důležité: denní aktualizace na Renderu
 
-`node-cron` běží pouze po dobu, kdy běží Node proces. Pokud je webová služba
-na Renderu uspávaná, denní kontrola se nespustí. Pro spolehlivé aktualizace
-vytvořte na Renderu samostatný **Cron Job** se stejným repozitářem a databází:
+Webová služba je ve souboru `render.yaml` nasazena na placeném Renderu
+(`plan: starter`), aby se při nečinnosti nespínala.
 
-- **Build Command:** `bash render-build.sh`
-- **Schedule:** `0 1 * * *`
-- **Start Command:** `cd backend && npm run refresh`
-
-Na webové službě nastavte `ENABLE_IN_PROCESS_CRON=false`, aby se aktualizace
-nespouštěla dvakrát, pokud webová instance zůstane běžet.
+GitHub Actions workflow `.github/workflows/daily-price-refresh.yml` volá
+`/api/cron/refresh` každý den ve 11:00 podle času Prahy. Nastavte v GitHubu
+secret `APP_URL` s veřejnou URL aplikace.
+Volitelně nastavte stejný secret `CRON_SECRET` jak v GitHubu, tak na Renderu;
+workflow pak endpoint zavolá s hlavičkou `x-cron-secret`.
 
 Dashboard si navíc data automaticky načítá každou hodinu.
 

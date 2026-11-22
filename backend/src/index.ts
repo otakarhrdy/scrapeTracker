@@ -32,6 +32,40 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
+let refreshInProgress = false;
+
+async function runProtectedRefresh(
+  req: Request,
+  res: Response,
+): Promise<Response> {
+  const cronSecret = process.env.CRON_SECRET;
+  if (
+    cronSecret &&
+    req.headers["x-cron-secret"] !== cronSecret
+  ) {
+    return res.status(401).json({ error: "Neplatný cron secret." });
+  }
+
+  if (refreshInProgress) {
+    return res.status(202).json({
+      success: true,
+      message: "Aktualizace cen již probíhá.",
+      alreadyRunning: true,
+    });
+  }
+
+  refreshInProgress = true;
+  try {
+    await refreshPrices(prisma);
+    return res.json({
+      success: true,
+      message: "Ceny byly úspěšně aktualizovány.",
+    });
+  } finally {
+    refreshInProgress = false;
+  }
+}
+
 // Middleware pro povolení požadavků z frontendu a zpracování JSON těla
 app.use(
   cors({
@@ -249,11 +283,7 @@ app.delete("/api/products/:id", async (req: Request, res: Response) => {
 app.get("/api/cron/refresh", async (_req: Request, res: Response) => {
   try {
     console.log("⏰ [WEBHOOK CRON] Požadavek na aktualizaci cen...");
-    await refreshPrices(prisma);
-    return res.json({
-      success: true,
-      message: "Ceny byly úspěšně aktualizovány.",
-    });
+    return await runProtectedRefresh(_req, res);
   } catch (err: any) {
     console.error("❌ [WEBHOOK CRON] Chyba:", err);
     return res.status(500).json({ error: err.message });
@@ -264,11 +294,7 @@ app.get("/api/cron/refresh", async (_req: Request, res: Response) => {
 app.get("/api/test-refresh", async (_req: Request, res: Response) => {
   try {
     console.log("🚀 Spouštím okamžitý ruční refresh cen...");
-    await refreshPrices(prisma);
-    return res.json({
-      success: true,
-      message: "Ceny byly úspěšně aktualizovány!",
-    });
+    return await runProtectedRefresh(_req, res);
   } catch (err: any) {
     console.error("❌ Chyba při ručním refreshi:", err);
     return res.status(500).json({ error: err.message });

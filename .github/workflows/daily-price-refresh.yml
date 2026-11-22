@@ -1,0 +1,41 @@
+name: Daily price refresh
+
+on:
+  schedule:
+    - cron: "0 9,10 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: daily-price-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh prices at Prague 11:00
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_hour=$(TZ=Europe/Prague date +%H)
+          if [ "$current_hour" != "11" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "Outside Prague 11:00 (current hour: $current_hour); skipping."
+            exit 0
+          fi
+
+          if [ -z "$APP_URL" ]; then
+            echo "APP_URL secret is not configured."
+            exit 1
+          fi
+
+          headers=(-H "Accept: application/json")
+          if [ -n "$CRON_SECRET" ]; then
+            headers+=(-H "x-cron-secret: $CRON_SECRET")
+          fi
+
+          curl --fail --show-error --silent --max-time 600 \
+            "${headers[@]}" \
+            "$APP_URL/api/cron/refresh"

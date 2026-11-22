@@ -12,6 +12,7 @@ async function getBrowser() {
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--disable-blink-features=AutomationControlled",
             ],
         });
     }
@@ -90,7 +91,7 @@ export function extractPriceValue(raw) {
         return null;
     return parsed;
 }
-// Pomocná funkce pro vytažení dat z HTML (JSON-LD + meta značky)
+// Pomocná funkce pro vytažení dat z HTML (JSON-LD + meta značky + CSS selektory)
 export function extractDataFromHtml(html) {
     const $ = cheerio.load(html);
     // A) Rychlé vyhledání v JSON-LD mikrodatech
@@ -120,29 +121,58 @@ export function extractDataFromHtml(html) {
             }
         }
         catch {
-            // Ignorujeme nevalidní JSON bloky
+            // Ignorujeme nevalidní JSON
         }
     }
     // B) Fallback na meta tagy
-    const metaTitle = $('meta[property="og:title"]').attr("content") || $("title").text().trim();
+    const metaTitle = $('meta[property="og:title"]').attr("content") ||
+        $('meta[name="twitter:title"]').attr("content") ||
+        $("h1").first().text().trim() ||
+        $("title").text().trim();
     const metaPrice = $('meta[property="product:price:amount"]').attr("content") ||
-        $('meta[property="og:price:amount"]').attr("content");
-    if (metaTitle && metaPrice) {
+        $('meta[property="og:price:amount"]').attr("content") ||
+        $('meta[name="price"]').attr("content");
+    if (metaPrice) {
         const parsedPrice = extractPriceValue(metaPrice);
-        if (parsedPrice !== null) {
+        if (parsedPrice !== null && metaTitle) {
             return { title: metaTitle, price: parsedPrice };
+        }
+    }
+    // C) Fallback na časté CSS selektory českých a globálních e-shopů
+    const selectors = [
+        ".price-box__price",
+        ".bigPrice",
+        "[data-price]",
+        ".price_withVat",
+        ".price-v2",
+        ".c2",
+        "span.price",
+        ".price-item--regular",
+        "p.price_color",
+        '[class*="Price_price"]',
+        '[class*="mainPrice"]',
+        '[itemprop="price"]',
+    ];
+    for (const selector of selectors) {
+        const el = $(selector).first();
+        if (el.length) {
+            const priceText = el.attr("data-price") || el.attr("content") || el.text() || "";
+            const parsedPrice = extractPriceValue(priceText);
+            if (parsedPrice !== null) {
+                return { title: metaTitle || "Neznámý produkt", price: parsedPrice };
+            }
         }
     }
     return null;
 }
 // Hlavní scraper funkce
 export async function scrapeProduct(url) {
-    // 1. Ultra-rychlý pokus přes Axios (~200 až 500 ms)
+    // 1. Rychlý pokus přes Axios (~200 až 500 ms)
     try {
         const response = await axios.get(url, {
-            timeout: 3500,
+            timeout: 4000,
             headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
             },
         });
@@ -154,16 +184,18 @@ export async function scrapeProduct(url) {
     catch {
         // Pokud Axios selže (např. Cloudflare ochrana), pokračujeme na Playwright
     }
-    // 2. Playwright fallback s blokováním zbytečných médií
+    // 2. Playwright fallback pro JS stránky
     const browser = await getBrowser();
     const context = await browser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        viewport: { width: 1366, height: 768 },
+        locale: "cs-CZ",
     });
     const page = await context.newPage();
-    // Zablokování stahování obrázků, stylů a fontů pro maximální rychlost
+    // Blokujeme pouze těžká média (obrázky, fonty), CSS necháváme pro správný JS render
     await page.route("**/*", (route) => {
         const resourceType = route.request().resourceType();
-        if (["image", "stylesheet", "font", "media", "imageset"].includes(resourceType)) {
+        if (["image", "font", "media", "imageset"].includes(resourceType)) {
             route.abort();
         }
         else {
@@ -171,18 +203,21 @@ export async function scrapeProduct(url) {
         }
     });
     try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+        // Krátká pauza na dokončení klientského renderu
+        await page.waitForTimeout(1500);
         const html = await page.content();
         const playwrightResult = extractDataFromHtml(html);
         if (playwrightResult) {
             return playwrightResult;
         }
+        // 3. Poslední záchrana: Regex vyhledání v celém textu stránky
         const title = (await page.title()) || "Neznámý produkt";
         const bodyText = await page.innerText("body");
-        const priceMatch = bodyText.match(/(\d[\d\s]*([.,]\d{1,2})?)\s*(Kč|CZK|€|\$)/i);
+        const priceMatch = bodyText.match(/(\d[\d\s\u00a0]*([.,]\d{1,2})?)\s*(Kč|CZK|€|\$|,-)/i);
         if (priceMatch) {
-            const cleanPrice = parseFloat(priceMatch[1].replace(/\s+/g, "").replace(",", "."));
-            if (!isNaN(cleanPrice) && cleanPrice > 0) {
+            const cleanPrice = extractPriceValue(priceMatch[1]);
+            if (cleanPrice !== null) {
                 return { title: title.replace(/\s+/g, " ").trim(), price: cleanPrice };
             }
         }
