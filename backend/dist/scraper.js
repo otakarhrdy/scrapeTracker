@@ -3,6 +3,12 @@ import * as cheerio from "cheerio";
 import { chromium } from "playwright";
 // Sdílená instance prohlížeče (zabrání pomalému spouštění od nuly)
 let globalBrowser = null;
+class AccessBlockedError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "AccessBlockedError";
+    }
+}
 async function getBrowser() {
     if (!globalBrowser || !globalBrowser.isConnected()) {
         globalBrowser = await chromium.launch({
@@ -12,7 +18,6 @@ async function getBrowser() {
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--disable-blink-features=AutomationControlled",
             ],
         });
     }
@@ -90,6 +95,16 @@ export function extractPriceValue(raw) {
     if (!Number.isFinite(parsed) || parsed <= 0)
         return null;
     return parsed;
+}
+export function getAccessBlockReason(status, html) {
+    if (status === 401 || status === 403 || status === 429) {
+        return `Web odmítl automatizovaný přístup (HTTP ${status}).`;
+    }
+    const pageText = cheerio.load(html)("body").text().toLowerCase();
+    if (/captcha|verify (that )?you are human|prove you are human|access denied|automated requests|unusual traffic|checking your browser/.test(pageText)) {
+        return "Web zobrazil ověření nebo ochranu proti automatizovanému přístupu.";
+    }
+    return null;
 }
 // Pomocná funkce pro vytažení dat z HTML (JSON-LD + meta značky + CSS selektory)
 export function extractDataFromHtml(html) {
@@ -176,13 +191,28 @@ export async function scrapeProduct(url) {
                 "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
             },
         });
+        const blockReason = getAccessBlockReason(response.status, String(response.data));
+        if (blockReason) {
+            throw new AccessBlockedError(blockReason);
+        }
         const directResult = extractDataFromHtml(response.data);
         if (directResult) {
             return directResult;
         }
     }
-    catch {
-        // Pokud Axios selže (např. Cloudflare ochrana), pokračujeme na Playwright
+    catch (error) {
+        if (error instanceof AccessBlockedError) {
+            throw error;
+        }
+        if (axios.isAxiosError(error)) {
+            const blockReason = getAccessBlockReason(error.response?.status, typeof error.response?.data === "string"
+                ? error.response.data
+                : "");
+            if (blockReason) {
+                throw new AccessBlockedError(blockReason);
+            }
+        }
+        // Při síťové chybě nebo bez nalezených dat pokračujeme na Playwright.
     }
     // 2. Playwright fallback pro JS stránky
     const browser = await getBrowser();
@@ -203,13 +233,23 @@ export async function scrapeProduct(url) {
         }
     });
     try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-        // Krátká pauza na dokončení klientského renderu
-        await page.waitForTimeout(1500);
-        const html = await page.content();
-        const playwrightResult = extractDataFromHtml(html);
-        if (playwrightResult) {
-            return playwrightResult;
+        const response = await page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: 20000,
+        });
+        let html = "";
+        for (let attempt = 0; attempt < 5; attempt++) {
+            // Počkáme na klientský render, ale skončíme hned, jakmile se objeví cena.
+            await page.waitForTimeout(1000);
+            html = await page.content();
+            const blockReason = getAccessBlockReason(response?.status(), html);
+            if (blockReason) {
+                throw new AccessBlockedError(blockReason);
+            }
+            const playwrightResult = extractDataFromHtml(html);
+            if (playwrightResult) {
+                return playwrightResult;
+            }
         }
         // 3. Poslední záchrana: Regex vyhledání v celém textu stránky
         const title = (await page.title()) || "Neznámý produkt";

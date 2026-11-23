@@ -5,6 +5,13 @@ import { chromium, type Browser } from "playwright";
 // Sdílená instance prohlížeče (zabrání pomalému spouštění od nuly)
 let globalBrowser: Browser | null = null;
 
+class AccessBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AccessBlockedError";
+  }
+}
+
 async function getBrowser(): Promise<Browser> {
   if (!globalBrowser || !globalBrowser.isConnected()) {
     globalBrowser = await chromium.launch({
@@ -14,7 +21,6 @@ async function getBrowser(): Promise<Browser> {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--disable-blink-features=AutomationControlled",
       ],
     });
   }
@@ -93,6 +99,26 @@ export function extractPriceValue(raw: unknown): number | null {
   const parsed = Number.parseFloat(cleaned);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return parsed;
+}
+
+export function getAccessBlockReason(
+  status: number | undefined,
+  html: string,
+): string | null {
+  if (status === 401 || status === 403 || status === 429) {
+    return `Web odmítl automatizovaný přístup (HTTP ${status}).`;
+  }
+
+  const pageText = cheerio.load(html)("body").text().toLowerCase();
+  if (
+    /captcha|verify (that )?you are human|prove you are human|access denied|automated requests|unusual traffic|checking your browser/.test(
+      pageText,
+    )
+  ) {
+    return "Web zobrazil ověření nebo ochranu proti automatizovanému přístupu.";
+  }
+
+  return null;
 }
 
 // Pomocná funkce pro vytažení dat z HTML (JSON-LD + meta značky + CSS selektory)
@@ -199,12 +225,36 @@ export async function scrapeProduct(
       },
     });
 
+    const blockReason = getAccessBlockReason(
+      response.status,
+      String(response.data),
+    );
+    if (blockReason) {
+      throw new AccessBlockedError(blockReason);
+    }
+
     const directResult = extractDataFromHtml(response.data);
     if (directResult) {
       return directResult;
     }
-  } catch {
-    // Pokud Axios selže (např. Cloudflare ochrana), pokračujeme na Playwright
+  } catch (error) {
+    if (error instanceof AccessBlockedError) {
+      throw error;
+    }
+
+    if (axios.isAxiosError(error)) {
+      const blockReason = getAccessBlockReason(
+        error.response?.status,
+        typeof error.response?.data === "string"
+          ? error.response.data
+          : "",
+      );
+      if (blockReason) {
+        throw new AccessBlockedError(blockReason);
+      }
+    }
+
+    // Při síťové chybě nebo bez nalezených dat pokračujeme na Playwright.
   }
 
   // 2. Playwright fallback pro JS stránky
@@ -229,16 +279,26 @@ export async function scrapeProduct(
   });
 
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 20000,
+    });
 
-    // Krátká pauza na dokončení klientského renderu
-    await page.waitForTimeout(1500);
+    let html = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      // Počkáme na klientský render, ale skončíme hned, jakmile se objeví cena.
+      await page.waitForTimeout(1000);
+      html = await page.content();
 
-    const html = await page.content();
-    const playwrightResult = extractDataFromHtml(html);
+      const blockReason = getAccessBlockReason(response?.status(), html);
+      if (blockReason) {
+        throw new AccessBlockedError(blockReason);
+      }
 
-    if (playwrightResult) {
-      return playwrightResult;
+      const playwrightResult = extractDataFromHtml(html);
+      if (playwrightResult) {
+        return playwrightResult;
+      }
     }
 
     // 3. Poslední záchrana: Regex vyhledání v celém textu stránky

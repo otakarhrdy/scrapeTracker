@@ -151,6 +151,11 @@ Playwright je použit pro scraping HTML stránek. Implementace:
 - Extrakt dat pomocí CSS selektorů
 - Parsování JSON-LD mikro-dat
 - Fallback na alternativní selektory
+- Při běžné síťové chybě nebo stránce vykreslované JavaScriptem se použije
+  Playwright
+- Pokud web vrátí CAPTCHA, ochrannou stránku nebo HTTP 401/403/429, scraper
+  přístup neobchází a vrátí srozumitelnou chybu. U takových webů použijte
+  oficiální API nebo jiný webem povolený způsob přístupu.
 
 ## Nasazení na Render.com
 
